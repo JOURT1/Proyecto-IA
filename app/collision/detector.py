@@ -72,18 +72,18 @@ class CollisionDetector:
         
         # Scoring Weights
         self.weights = {
-            'proximity': 0.40,
-            'convergence': 0.35,
-            'velocity_drop': 0.15,
-            'direction_change': 0.10
+            'proximity': self.config.get('collision.weights.proximity', 0.40),
+            'convergence': self.config.get('collision.weights.convergence', 0.35),
+            'velocity_drop': self.config.get('collision.weights.velocity_drop', 0.15),
+            'direction_change': self.config.get('collision.weights.direction_change', 0.10)
         }
         
-        # Thresholds
-        self.score_threshold_potential = 0.40
-        self.score_threshold_confirmed = 0.80  # Much stricter
-        self.validation_frames_required = 25  # Almost 1 second of persistence
-        self.alert_cooldown_seconds = 600     # 10 minutes
-        self.min_movement_speed = 1.0         # 3.6 km/h minimum
+        # Thresholds from Config
+        self.score_threshold_potential = self.config.get('collision.potential_threshold', 0.40)
+        self.score_threshold_confirmed = self.config.get('collision.confirmed_threshold', 0.70) # Relaxed from 0.80 to 0.70
+        self.validation_frames_required = self.config.get('collision.collision_confirmation_frames', 15) # From config
+        self.alert_cooldown_seconds = self.config.get('collision.alert_cooldown', 600)
+        self.min_movement_speed = self.config.get('collision.ignore_slow_collisions_below_velocity', 1.0)
         
         # State tracking
         self.pair_states: Dict[Tuple[int, int], CollisionPairState] = {}
