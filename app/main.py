@@ -307,12 +307,12 @@ with tab2:
             
             # Get processor
             processor = get_processor()
-            processor.detector.set_confidence_threshold(confidence_threshold)
-            processor.detector.set_iou_threshold(iou_threshold)
+            # AUTO-AJUSTE AUTÓNOMO: El sistema aplica lo aprendido
+            processor.collision_detector.apply_optimal_params(current_params)
+            processor.detector.confidence_threshold = current_params['confidence_threshold']
             
-            # Adjust collision detection sensitivity
-            # Higher sensitivity = lower detection threshold = fewer false positives
-            critical_distance = 1.5 * collision_sensitivity  # 1.05 to 1.5 meters
+            # Legacy sensitivity for backwards compatibility
+            critical_distance = 1.8 * (1.0 - current_params['collision_sensitivity'])
             processor.collision_detector.config.set('collision.critical_proximity_distance', critical_distance)
             
             # Prepare output
@@ -417,9 +417,11 @@ with tab2:
                         video_name=st.session_state.video_name,
                         accidents_detected=results['accidents_detected'],
                         total_frames=results['total_frames'],
-                        confidence_threshold=confidence_threshold,
-                        iou_threshold=iou_threshold,
-                        collision_sensitivity=collision_sensitivity,
+                        confidence_threshold=current_params['confidence_threshold'],
+                        iou_threshold=current_params['iou_threshold'],
+                        collision_sensitivity=current_params['collision_sensitivity'],
+                        validation_frames=current_params['validation_frames'],
+                        confirmed_score=current_params['confirmed_score'],
                         false_positive_feedback=quality_rating / 100.0
                     )
                     st.success("🤖 Feedback guardado. El sistema mejorará en próximos análisis.")

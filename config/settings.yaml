@@ -7,7 +7,7 @@ model:
   # YOLO model version and weights
   yolo_model: "yolov8s.pt"  # upgraded to small for better recognition
   yolo_device: "auto"  # 'cuda', 'cpu', or 'auto' for auto-detection
-  confidence_threshold: 0.40  # Set back to 0.40 for more stable detections
+  confidence_threshold: 0.20  # Extreme recall for missed accidents
   iou_threshold: 0.45  # Standard NMS
   
   # Vehicle classes to detect
@@ -64,8 +64,8 @@ collision:
   # Temporal window for collision event
   pre_impact_window: 15  # frames before impact to analyze
   post_impact_window: 20  # frames after impact to analyze
-  collision_confirmation_frames: 30  # Strict persistence (1 second)
-  confirmed_threshold: 0.78  # High confidence required
+  collision_confirmation_frames: 5  # Ultra-rapid detection
+  confirmed_threshold: 0.45  # Low threshold to capture all real events
   
   # Vehicle permanence after impact
   min_stationary_time_post_impact: 5  # frames - stopped after collision

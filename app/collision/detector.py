@@ -78,12 +78,12 @@ class CollisionDetector:
             'direction_change': self.config.get('collision.weights.direction_change', 0.10)
         }
         
-        # Thresholds from Config
-        self.score_threshold_potential = self.config.get('collision.potential_threshold', 0.40)
-        self.score_threshold_confirmed = self.config.get('collision.confirmed_threshold', 0.70) # Relaxed from 0.80 to 0.70
-        self.validation_frames_required = self.config.get('collision.collision_confirmation_frames', 15) # From config
+        # Thresholds from Config - Highly reactive to ensure real crashes are captured
+        self.score_threshold_potential = self.config.get('collision.potential_threshold', 0.35)
+        self.score_threshold_confirmed = self.config.get('collision.confirmed_threshold', 0.55) # Relaxed for recall
+        self.validation_frames_required = self.config.get('collision.collision_confirmation_frames', 8)  # Faster reaction
         self.alert_cooldown_seconds = self.config.get('collision.alert_cooldown', 600)
-        self.min_movement_speed = self.config.get('collision.ignore_slow_collisions_below_velocity', 1.0)
+        self.min_movement_speed = self.config.get('collision.ignore_slow_collisions_below_velocity', 0.5)
         
         # State tracking
         self.pair_states: Dict[Tuple[int, int], CollisionPairState] = {}
@@ -91,6 +91,19 @@ class CollisionDetector:
         self.location_cooldowns: List[Dict] = [] # List of {pos: (x,y), time: float}
         
         self.logger.info("Advanced CollisionDetector initialized")
+        
+    def apply_optimal_params(self, params: Dict):
+        """Apply parameters learned by the AdaptiveLearner."""
+        self.score_threshold_potential = params.get('confidence_threshold', self.score_threshold_potential)
+        self.score_threshold_confirmed = params.get('confirmed_score', self.score_threshold_confirmed)
+        self.validation_frames_required = params.get('validation_frames', self.validation_frames_required)
+        
+        # Adjust weights based on sensitivity
+        sens = params.get('collision_sensitivity', 0.5)
+        self.weights['proximity'] = 0.3 + (0.2 * sens)
+        self.weights['convergence'] = 0.3 + (0.2 * sens)
+        
+        self.logger.info(f"Self-Adjusted: Conf={self.score_threshold_confirmed}, Frames={self.validation_frames_required}")
     
     def detect(
         self,
@@ -138,8 +151,14 @@ class CollisionDetector:
                 state_obj.scores_history.append(score)
                 if len(state_obj.scores_history) > 30: state_obj.scores_history.pop(0)
                 
+                # AUTO-ADJUST: High-Risk Hunting Mode
+                # If path convergence is high, temporarily lower the confirmed threshold for THIS pair
+                pair_threshold = self.score_threshold_confirmed
+                if 'path_convergence' in active_signals:
+                    pair_threshold *= 0.8  # 20% more sensitive in high-risk zones
+                
                 # 2. State Machine Logic
-                new_event = self._update_state_machine(state_obj, score, active_signals, kin_a, kin_b, frame_number)
+                new_event = self._update_state_machine(state_obj, score, active_signals, kin_a, kin_b, frame_number, pair_threshold)
                 if new_event:
                     # Global Location Cooldown check
                     avg_pos = ((kin_a.position[0] + kin_b.position[0])/2, (kin_a.position[1] + kin_b.position[1])/2)
@@ -171,8 +190,13 @@ class CollisionDetector:
         
         # A. Proximity Score (Inverse exponential)
         dist = self.kinematics.calculate_distance(k_a.position, k_b.position)
-        # Critical if < 1.0m, Ignored if > 5.0m
-        prox_score = max(0, min(1.0, 1.0 - (dist - 0.5) / 4.5))
+        # Critical if < 1.5m, Ignored if > 8.0m (extended range)
+        prox_score = max(0, min(1.0, 1.0 - (dist - 0.5) / 7.5))
+        if dist < 1.5:
+            prox_score = 1.0 # Force max proximity score if extremely close
+            signals.append('near_contact_zone')
+            score += 0.2 # Direct bonus for risk zone
+        
         if prox_score > 0.8: signals.append('extreme_proximity')
         score += prox_score * self.weights['proximity']
         
@@ -245,9 +269,12 @@ class CollisionDetector:
         self, state_obj: CollisionPairState, 
         current_score: float, signals: List[str],
         kin_a: KinematicState, kin_b: KinematicState,
-        frame: int
+        frame: int,
+        pair_threshold: Optional[float] = None
     ) -> Optional[CollisionEvent]:
         """Update detection state and confirm events if persistence is met."""
+        
+        target_confirm_threshold = pair_threshold or self.score_threshold_confirmed
         
         if state_obj.state == DetectionState.NONE:
             if current_score > self.score_threshold_potential:
@@ -267,7 +294,7 @@ class CollisionDetector:
                 state_obj.frames_in_state += 1
                 # Check for confirmation
                 avg_recent_score = sum(state_obj.scores_history[-15:]) / min(15, len(state_obj.scores_history))
-                if state_obj.frames_in_state >= self.validation_frames_required and avg_recent_score > self.score_threshold_confirmed:
+                if state_obj.frames_in_state >= self.validation_frames_required and avg_recent_score > target_confirm_threshold:
                     state_obj.state = DetectionState.CONFIRMED
                     return self._create_event(state_obj, avg_recent_score, signals, kin_a, kin_b, frame)
             else:

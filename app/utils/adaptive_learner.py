@@ -33,24 +33,17 @@ class AdaptiveLearner:
             json.dump(self.history, f, indent=2)
     
     def record_analysis(self, 
-                       video_name: str,
-                       accidents_detected: int,
-                       total_frames: int,
-                       confidence_threshold: float,
-                       iou_threshold: float,
-                       collision_sensitivity: float,
-                       false_positive_feedback: float = 0.5) -> None:
+                        video_name: str,
+                        accidents_detected: int,
+                        total_frames: int,
+                        confidence_threshold: float,
+                        iou_threshold: float,
+                        collision_sensitivity: float,
+                        validation_frames: int = 15,
+                        confirmed_score: float = 0.60,
+                        false_positive_feedback: float = 0.5) -> None:
         """
-        Registrar un análisis completado.
-        
-        Args:
-            video_name: Nombre del video
-            accidents_detected: Número de accidentes detectados
-            total_frames: Total de frames
-            confidence_threshold: Umbral de confianza usado
-            iou_threshold: Umbral IoU usado
-            collision_sensitivity: Sensibilidad de colisiones usado
-            false_positive_feedback: 0-1, qué tan buenos fueron los resultados (1=perfecto, 0=muchos falsos)
+        Registrar un análisis completado con parámetros extendidos.
         """
         record = {
             'timestamp': datetime.now().isoformat(),
@@ -61,6 +54,8 @@ class AdaptiveLearner:
             'confidence_threshold': confidence_threshold,
             'iou_threshold': iou_threshold,
             'collision_sensitivity': collision_sensitivity,
+            'validation_frames': validation_frames,
+            'confirmed_score': confirmed_score,
             'quality_score': false_positive_feedback  # 1=excelente, 0=pobre
         }
         self.history.append(record)
@@ -74,9 +69,11 @@ class AdaptiveLearner:
         """
         if not self.history:
             return {
-                'confidence_threshold': 0.5,
+                'confidence_threshold': 0.35,
                 'iou_threshold': 0.45,
-                'collision_sensitivity': 0.7,
+                'collision_sensitivity': 0.6,
+                'validation_frames': 12,
+                'confirmed_score': 0.55,
                 'learning_iterations': 0,
                 'quality_history': []
             }
@@ -96,47 +93,53 @@ class AdaptiveLearner:
         # Si tenemos poco historial, usar valores conservadores
         if len(records) < 3:
             return {
-                'confidence_threshold': 0.55,
+                'confidence_threshold': 0.30,
                 'iou_threshold': 0.5,
-                'collision_sensitivity': 0.8,
+                'collision_sensitivity': 0.5,
+                'validation_frames': 10,
+                'confirmed_score': 0.5,
                 'learning_iterations': len(records),
                 'quality_history': [r['quality_score'] for r in self.history]
             }
         
-        # Extraer datos
+        # Extraer datos extendidos
         qualities = np.array([r['quality'] for r in records])
         confs = np.array([r['conf'] for r in records])
         ious = np.array([r['iou'] for r in records])
         colls = np.array([r['coll'] for r in records])
+        v_frames = np.array([r.get('validation_frames', 15) for r in records])
+        scores = np.array([r.get('confirmed_score', 0.60) for r in records])
         accident_rates = np.array([r['accident_rate'] for r in records])
         
-        # Normalizar calidades para usarlas como pesos (inversión: mejor quality = mayor peso)
+        # Pesos basados en calidad y recencia
         weights = (qualities - qualities.min()) / (qualities.max() - qualities.min() + 0.0001) + 0.1
-        weights = weights / weights.sum()  # Normalizar a suma=1
+        recency_weights = np.linspace(0.5, 1.0, len(weights))
+        weights = weights * recency_weights
+        weights = weights / weights.sum()
         
-        # Calcular media ponderada de parámetros exitosos
+        # Media ponderada
         optimal_conf = float(np.average(confs, weights=weights))
         optimal_iou = float(np.average(ious, weights=weights))
         optimal_coll = float(np.average(colls, weights=weights))
+        optimal_v_frames = int(np.average(v_frames, weights=weights))
+        optimal_score = float(np.average(scores, weights=weights))
         
-        # Ajuste inteligente basado en tasas de accidentes
-        mean_accident_rate = np.mean(accident_rates)
-        
-        # Si hay demasiadas detecciones (alta tasa de accidentes), aumentar sensibilidad
-        if mean_accident_rate > 0.02:  # >2% es sospechoso
-            optimal_coll = min(0.9, optimal_coll + 0.05)  # Más restrictivo
-        elif mean_accident_rate < 0.001:  # Muy pocas detecciones
-            optimal_coll = max(0.3, optimal_coll - 0.05)  # Más sensible
-        
-        # Redondear a 2 decimales
-        optimal_conf = round(max(0.3, min(0.8, optimal_conf)), 2)
-        optimal_iou = round(max(0.2, min(0.9, optimal_iou)), 2)
-        optimal_coll = round(max(0.3, min(0.95, optimal_coll)), 2)
+        # Ajuste adaptativo según accidentes detectados
+        mean_rate = np.mean(accident_rates)
+        if mean_rate > 0.01: # Muchas detecciones -> endurecer
+            optimal_v_frames = min(45, optimal_v_frames + 5)
+            optimal_score = min(0.85, optimal_score + 0.05)
+        elif mean_rate < 0.0001: # Pocas detecciones -> sensibilizar
+            optimal_v_frames = max(5, optimal_v_frames - 3)
+            optimal_score = max(0.40, optimal_score - 0.05)
+            optimal_conf = max(0.20, optimal_conf - 0.05)
         
         return {
-            'confidence_threshold': optimal_conf,
-            'iou_threshold': optimal_iou,
-            'collision_sensitivity': optimal_coll,
+            'confidence_threshold': round(max(0.2, min(0.8, optimal_conf)), 2),
+            'iou_threshold': round(max(0.2, min(0.9, optimal_iou)), 2),
+            'collision_sensitivity': round(max(0.2, min(0.95, optimal_coll)), 2),
+            'validation_frames': int(max(5, min(60, optimal_v_frames))),
+            'confirmed_score': round(max(0.35, min(0.90, optimal_score)), 2),
             'learning_iterations': len(records),
             'quality_history': list(qualities),
             'last_quality': float(qualities[-1])
