@@ -104,7 +104,7 @@ with st.sidebar:
     st.info("""
     **Stack Tecnológico:**
     - Python 3.13
-    - YOLO v8n (Detección)
+    - YOLO v8s (Detección)
     - ByteTrack (Tracking)
     - OpenCV (Procesamiento)
     - Streamlit (Interfaz)

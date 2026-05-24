@@ -88,6 +88,7 @@ class CollisionDetector:
         # State tracking
         self.pair_states: Dict[Tuple[int, int], CollisionPairState] = {}
         self.active_events: List[CollisionEvent] = []
+        self.location_cooldowns: List[Dict] = [] # List of {pos: (x,y), time: float}
         
         self.logger.info("Advanced CollisionDetector initialized")
     
@@ -140,8 +141,21 @@ class CollisionDetector:
                 # 2. State Machine Logic
                 new_event = self._update_state_machine(state_obj, score, active_signals, kin_a, kin_b, frame_number)
                 if new_event:
-                    current_frame_events.append(new_event)
-                    state_obj.cooldown_until = time.time() + self.alert_cooldown_seconds
+                    # Global Location Cooldown check
+                    avg_pos = ((kin_a.position[0] + kin_b.position[0])/2, (kin_a.position[1] + kin_b.position[1])/2)
+                    is_duplicate_loc = False
+                    for cd in self.location_cooldowns:
+                        if self.kinematics.calculate_distance(avg_pos, cd['pos']) < 10.0: # 10 meters
+                            is_duplicate_loc = True
+                            break
+                    
+                    if not is_duplicate_loc:
+                        current_frame_events.append(new_event)
+                        state_obj.cooldown_until = time.time() + self.alert_cooldown_seconds
+                        self.location_cooldowns.append({'pos': avg_pos, 'time': time.time() + self.alert_cooldown_seconds})
+                
+        # Cleanup location cooldowns
+        self.location_cooldowns = [cd for cd in self.location_cooldowns if time.time() < cd['time']]
         
         return current_frame_events
 
@@ -252,7 +266,7 @@ class CollisionDetector:
             if current_score > self.score_threshold_potential:
                 state_obj.frames_in_state += 1
                 # Check for confirmation
-                avg_recent_score = sum(state_obj.scores_history[-10:]) / min(10, len(state_obj.scores_history))
+                avg_recent_score = sum(state_obj.scores_history[-15:]) / min(15, len(state_obj.scores_history))
                 if state_obj.frames_in_state >= self.validation_frames_required and avg_recent_score > self.score_threshold_confirmed:
                     state_obj.state = DetectionState.CONFIRMED
                     return self._create_event(state_obj, avg_recent_score, signals, kin_a, kin_b, frame)
@@ -261,6 +275,12 @@ class CollisionDetector:
                 state_obj.frames_in_state = max(0, state_obj.frames_in_state - 2)
                 if state_obj.frames_in_state == 0:
                     state_obj.state = DetectionState.NONE
+        
+        elif state_obj.state == DetectionState.CONFIRMED:
+            # Once confirmed, stay in this state to avoid re-triggering until vehicles move apart
+            dist = self.kinematics.calculate_distance(kin_a.position, kin_b.position)
+            if dist > 10.0: # Vehicles cleared the scene
+                state_obj.state = DetectionState.NONE
                     
         return None
 
