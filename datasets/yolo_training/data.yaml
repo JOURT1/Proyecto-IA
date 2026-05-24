@@ -1,0 +1,6 @@
+path: C:\Users\USER\Desktop\Proyecto IA\datasets\yolo_training
+train: images
+val: images
+
+nc: 4
+names: ['car', 'motorcycle', 'bus', 'truck']

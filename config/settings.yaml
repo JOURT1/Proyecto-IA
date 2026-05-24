@@ -1,0 +1,207 @@
+# ============================================================================
+# TRAFFIC ACCIDENT DETECTION SYSTEM - CONFIGURATION
+# ============================================================================
+
+# ----- MODEL CONFIGURATION -----
+model:
+  # YOLO model version and weights
+  yolo_model: "yolov8n.pt"  # nano for speed, small/medium for accuracy
+  yolo_device: "auto"  # 'cuda', 'cpu', or 'auto' for auto-detection
+  confidence_threshold: 0.50  # Detection confidence threshold (0.0-1.0)
+  iou_threshold: 0.45  # IoU threshold for NMS
+  
+  # Vehicle classes to detect
+  vehicle_classes:
+    - "car"
+    - "motorcycle"
+    - "bus"
+    - "truck"
+
+# ----- TRACKING CONFIGURATION -----
+tracking:
+  algorithm: "bytetrack"  # 'bytetrack' or 'botsort'
+  tracker_type: "byte_tracker"
+  
+  # ByteTrack parameters
+  track_thresh: 0.5  # Detection threshold for tracking
+  track_buffer: 30  # Buffer size for missing detections (frames)
+  match_thresh: 0.8  # IOU threshold for matching
+  frame_rate: 30  # Expected frame rate
+  
+  # Trajectory storage
+  trajectory_history_length: 60  # Number of frames to keep in history
+  min_trajectory_length: 5  # Minimum frames to establish trajectory
+
+# ----- KINEMATICS CONFIGURATION -----
+kinematics:
+  # Pixel-to-meter conversion (rough estimate for CCTV)
+  # This should be calibrated per camera installation
+  pixel_to_meter: 0.05  # 1 pixel ≈ 0.05 meters
+  
+  # Velocity calculation (pixels per frame -> m/s)
+  fps: 30  # Frames per second of video
+  velocity_smoothing_window: 5  # Number of frames for velocity smoothing
+  
+  # Thresholds for kinematic detection
+  velocity_change_threshold: 2.0  # m/s sudden speed change
+  acceleration_threshold: 5.0  # m/s² sudden acceleration
+  direction_change_threshold: 45.0  # degrees
+  
+  # Proximity detection
+  min_proximity_distance: 3.0  # meters - proximity alert threshold
+  critical_proximity_distance: 1.5  # meters - very close
+  collision_distance_threshold: 0.5  # meters - contact threshold
+
+# ----- COLLISION DETECTION CONFIGURATION -----
+collision:
+  # Trajectory intersection detection
+  trajectory_intersection_buffer: 2.0  # meters - buffer around trajectory
+  
+  # Speed change indicators
+  min_velocity_drop_for_impact: 1.5  # m/s - minimum deceleration for impact
+  velocity_change_window: 3  # frames to evaluate for sudden changes
+  
+  # Temporal window for collision event
+  pre_impact_window: 15  # frames before impact to analyze
+  post_impact_window: 20  # frames after impact to analyze
+  collision_confirmation_frames: 3  # frames must show collision signals
+  
+  # Vehicle permanence after impact
+  min_stationary_time_post_impact: 5  # frames - stopped after collision
+  max_expected_movement_post_impact: 1.0  # meters
+  
+  # Multi-signal combination (must meet multiple criteria)
+  min_signals_for_collision: 3  # Minimum number of collision signals required
+  
+  # False positive reduction
+  minimum_accident_duration: 2  # frames - minimum event duration
+  ignore_slow_collisions_below_velocity: 0.5  # m/s - ignore very slow contact
+
+# ----- SEVERITY CLASSIFICATION CONFIGURATION -----
+severity:
+  # Severity score thresholds
+  thresholds:
+    leve_max: 30  # 0-30: Light incident
+    moderado_max: 65  # 31-65: Moderate accident
+    severo_min: 66  # 66+: Severe accident
+  
+  # Weight factors for severity calculation (must sum to 1.0)
+  weights:
+    velocity_change: 0.25  # Impact of speed change
+    direction_change: 0.15  # Directional alteration
+    proximity: 0.15  # How close the vehicles were
+    deceleration: 0.20  # Intensity of braking
+    permanence_time: 0.15  # How long stopped after impact
+    trajectory_distortion: 0.10  # Spatial disruption
+  
+  # Severity calculation parameters
+  max_velocity_change_for_scoring: 15.0  # m/s
+  max_deceleration_for_scoring: 10.0  # m/s²
+  max_permanence_time_frames: 120  # 4 seconds at 30 FPS
+  
+  # Severity level thresholds
+  severe_velocity_change: 4.0  # m/s
+  moderate_velocity_change: 2.0  # m/s
+  
+  severe_deceleration: 7.0  # m/s²
+  moderate_deceleration: 3.5  # m/s²
+
+# ----- VIDEO PROCESSING CONFIGURATION -----
+processing:
+  # Frame extraction and processing
+  target_fps: 15  # Process every Nth frame for speed (15 FPS is good balance)
+  frame_skip: 2  # Skip frames (1 = process all, 2 = every 2nd frame)
+  
+  # Video resizing for faster processing
+  resize_enabled: true
+  target_height: 480  # Resize to this height (maintains aspect ratio)
+  
+  # Memory optimization
+  max_frames_memory: 300  # Maximum frames to keep in memory during processing
+  
+  # Temporal smoothing
+  detection_smoothing: true
+  smoothing_window_size: 3  # Number of frames for smoothing
+
+# ----- VISUALIZATION CONFIGURATION -----
+visualization:
+  # Bounding box drawing
+  draw_detections: true
+  bbox_thickness: 2
+  bbox_color: [0, 255, 0]  # BGR format (Green)
+  
+  # Trajectory drawing
+  draw_trajectories: true
+  trajectory_thickness: 1
+  trajectory_color: [255, 0, 0]  # BGR format (Blue)
+  trajectory_max_age: 30  # Frames to display trail
+  
+  # ID and labels
+  draw_ids: true
+  text_size: 0.5
+  text_thickness: 1
+  text_color: [255, 255, 255]  # BGR format (White)
+  
+  # Alert visualization
+  alert_text_size: 1.2
+  alert_text_thickness: 2
+  
+  # Colors for severity levels
+  severity_colors:
+    leve: [0, 255, 255]      # Yellow (BGR)
+    moderado: [0, 165, 255]  # Orange (BGR)
+    severo: [0, 0, 255]      # Red (BGR)
+  
+  # Timeline/progress bar
+  draw_progress_bar: true
+  progress_bar_height: 30
+
+# ----- EXPORT CONFIGURATION -----
+export:
+  # Output formats
+  export_video: true
+  video_codec: "mp4v"  # Codec for output video
+  video_quality: 90  # Quality (0-100)
+  
+  export_csv: true
+  export_json: true
+  
+  # Output directory
+  output_dir: "outputs/"
+  
+  # Filenames
+  video_output_name: "processed_video.mp4"
+  csv_events_name: "accident_events.csv"
+  json_results_name: "detection_results.json"
+  
+  # Frame export (for analysis)
+  export_frames: false
+  export_frame_interval: 5  # Export every Nth frame
+
+# ----- LOGGING CONFIGURATION -----
+logging:
+  level: "INFO"  # DEBUG, INFO, WARNING, ERROR, CRITICAL
+  log_file: "logs/system.log"
+  log_to_console: true
+  
+  # Performance logging
+  log_processing_time: true
+  log_memory_usage: true
+  log_fps: true
+
+# ----- STREAMLIT UI CONFIGURATION -----
+ui:
+  # Dashboard settings
+  page_title: "Traffic Accident Detection System"
+  page_layout: "wide"
+  theme: "light"
+  
+  # Video player settings
+  max_upload_size_mb: 500
+  supported_formats: [".mp4", ".avi", ".mov", ".mkv"]
+  
+  # Processing settings
+  show_progress_bar: true
+  auto_play_result: true
+
+# ============================================================================
