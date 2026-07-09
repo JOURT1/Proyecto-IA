@@ -166,6 +166,8 @@ class KinematicsCalculator:
         vel_mag, _ = self._calculate_velocity(track)
         # Using bbox area as proxy for mass (simplified)
         bbox = track.to_tlbr()
+        if bbox is None:
+            return 0.0
         area = (bbox[2] - bbox[0]) * (bbox[3] - bbox[1])
         
         return area * (vel_mag ** 2)

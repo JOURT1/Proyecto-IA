@@ -1,6 +1,13 @@
-path: C:\Users\USER\Desktop\Proyecto IA\datasets\yolo_training
+# Synthetic YOLO dataset generated from the sample videos.
+# This folder has a single image/label split, so train and val point to it.
+
+path: datasets/yolo_training
 train: images
 val: images
 
 nc: 4
-names: ['car', 'motorcycle', 'bus', 'truck']
+names:
+  0: car
+  1: motorcycle
+  2: bus
+  3: truck

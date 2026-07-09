@@ -107,7 +107,7 @@ class SeverityClassifier:
         
         # 2. Relative Energy Index Dissipation
         # We check energy before vs after (approximated)
-        energy_score = self._calculate_energy_impact_score(collision_event.track_ids, kinematics_calc)
+        energy_score = self._calculate_energy_impact_score(collision_event, kin_states)
         factors['energy_dissipation'] = energy_score
         
         # 3. Post-Impact Permanence (Are they still together or stationary?)
@@ -144,11 +144,20 @@ class SeverityClassifier:
             description=self._generate_description(level, factors, final_score)
         )
 
-    def _calculate_energy_impact_score(self, track_ids, calc) -> float:
-        """Approximates energy dissipation during impact."""
-        # This is a simplification. In a real system, we'd compare 
-        # energy 5 frames before vs 5 frames after.
-        return 0.5 # Placeholder for refined logic
+    def _calculate_energy_impact_score(self, collision_event: CollisionEvent, kin_states: list) -> float:
+        """
+        Approximate impact energy from available kinematic signals.
+
+        Without calibrated vehicle mass, the most reliable proxy is the
+        relative velocity at impact plus abrupt acceleration/deceleration.
+        Values are normalized to 0..1 for the severity score.
+        """
+        relative_velocity_score = min(collision_event.relative_velocity / 8.0, 1.0)
+        acceleration_score = min(
+            max((kin.acceleration_magnitude for kin in kin_states), default=0.0) / 12.0,
+            1.0,
+        )
+        return (0.7 * relative_velocity_score) + (0.3 * acceleration_score)
 
     def _score_velocity_change(self, kin_states: list) -> float:
         # 5m/s drop is considered very high (approx 18km/h instant drop)

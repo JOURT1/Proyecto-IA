@@ -50,8 +50,8 @@ def main():
     
     parser.add_argument(
         '--device',
-        default='0',
-        help='CUDA device id (0 for GPU, or CPU) (default: 0)'
+        default='cpu',
+        help='Device for training: cpu or CUDA device id like 0 (default: cpu)'
     )
     
     parser.add_argument(

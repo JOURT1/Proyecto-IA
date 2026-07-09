@@ -25,6 +25,7 @@ wheels/
 MANIFEST
 
 # Virtual environments
+.venv/
 venv/
 env/
 ENV/
@@ -59,6 +60,7 @@ datasets/DoTA/
 *.mkv
 
 # Temporary files
+.tmp_pip/
 *.tmp
 temp/
 tmp/

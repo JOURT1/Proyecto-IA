@@ -44,6 +44,7 @@ class VehicleDetector:
         self.device = self._get_device()
         self.confidence_threshold = self.config.get('model.confidence_threshold', 0.5)
         self.iou_threshold = self.config.get('model.iou_threshold', 0.45)
+        self.image_size = self.config.get('model.image_size', 640)
         self.vehicle_classes = self.config.get('model.vehicle_classes', 
                                               ['car', 'motorcycle', 'bus', 'truck'])
         
@@ -85,7 +86,13 @@ class VehicleDetector:
             List of Detection objects
         """
         # Run inference
-        results = self.model(frame, conf=self.confidence_threshold, iou=self.iou_threshold)
+        results = self.model(
+            frame,
+            conf=self.confidence_threshold,
+            iou=self.iou_threshold,
+            imgsz=self.image_size,
+            verbose=False
+        )
         
         detections = []
         

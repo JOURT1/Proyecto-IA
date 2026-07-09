@@ -7,6 +7,7 @@ model:
   # YOLO model version and weights
   yolo_model: "yolov8s.pt"  # upgraded to small for better recognition
   yolo_device: "auto"  # 'cuda', 'cpu', or 'auto' for auto-detection
+  image_size: 640  # YOLO inference size
   confidence_threshold: 0.20  # Extreme recall for missed accidents
   iou_threshold: 0.45  # Standard NMS
   
@@ -24,8 +25,8 @@ tracking:
   
   # ByteTrack parameters
   track_thresh: 0.5  # Detection threshold for tracking
-  track_buffer: 30  # Buffer size for missing detections (frames)
-  match_thresh: 0.8  # IOU threshold for matching
+  track_buffer: 45  # Buffer size for missing detections (frames)
+  match_thresh: 0.45  # Combined association score threshold for matching
   frame_rate: 30  # Expected frame rate
   
   # Trajectory storage

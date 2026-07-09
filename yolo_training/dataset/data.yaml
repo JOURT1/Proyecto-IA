@@ -1,10 +1,14 @@
-names:
-- car
-- motorcycle
-- bus
-- truck
-nc: 4
-path: C:\Users\USER\Desktop\Proyecto IA\yolo_training\dataset
-test: test/images
+# Dataset configuration for quick YOLOv8 training.
+# Paths are relative to the repository root.
+
+path: yolo_training/dataset
 train: train/images
 val: val/images
+test: test/images
+
+nc: 4
+names:
+  0: car
+  1: motorcycle
+  2: bus
+  3: truck

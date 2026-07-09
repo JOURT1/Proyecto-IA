@@ -119,6 +119,7 @@ def main():
         results = processor.process_video(
             str(video_path),
             output_video_path=output_video,
+            output_dir=str(output_path),
             visualize=True,
             export_json=args.export_json,
             export_csv=args.export_csv

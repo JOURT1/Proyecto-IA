@@ -80,6 +80,10 @@ class Track:
         dx, dy = self.velocity
         
         return (int(x1 + dx), int(y1 + dy), int(x2 + dx), int(y2 + dy))
+
+    def to_tlbr(self) -> Tuple[int, int, int, int]:
+        """Return the current bbox in top-left/bottom-right format."""
+        return self.current_bbox
     
     def increment_age(self) -> None:
         """Increment age and time since last update."""
@@ -187,16 +191,16 @@ class ByteTracker:
             unmatched_tracks = list(range(len(self.tracks)))
             return [], [], unmatched_tracks
         
-        # Compute IoU matrix
-        iou_matrix = self._compute_iou_matrix(self.tracks, detections)
+        # Compute a robust matching score matrix. It combines IoU against the
+        # predicted box, center distance, class consistency and confidence.
+        score_matrix = self._compute_match_score_matrix(self.tracks, detections)
         
         # Greedy matching
         matched_pairs = []
         used_dets = set()
         used_tracks = set()
         
-        # Sort by IoU in descending order
-        indices = np.argsort(iou_matrix.flatten())[::-1]
+        indices = np.argsort(score_matrix.flatten())[::-1]
         
         for idx in indices:
             track_idx = idx // len(detections)
@@ -205,7 +209,7 @@ class ByteTracker:
             if track_idx in used_tracks or det_idx in used_dets:
                 continue
             
-            if iou_matrix[track_idx, det_idx] > self.match_thresh:
+            if score_matrix[track_idx, det_idx] >= self.match_thresh:
                 matched_pairs.append((track_idx, det_idx))
                 used_tracks.add(track_idx)
                 used_dets.add(det_idx)
@@ -214,6 +218,50 @@ class ByteTracker:
         unmatched_tracks = [i for i in range(len(self.tracks)) if i not in used_tracks]
         
         return matched_pairs, unmatched_dets, unmatched_tracks
+
+    def _compute_match_score_matrix(self, tracks: List[Track], detections: List[Detection]) -> np.ndarray:
+        """
+        Compute association scores between tracks and detections.
+
+        The original implementation depended only on IoU with the last bbox.
+        That is brittle when a detector misses frames or when vehicles move
+        quickly. This score uses the predicted bbox and a distance gate so IDs
+        remain more stable through short occlusions.
+        """
+        score_matrix = np.zeros((len(tracks), len(detections)))
+
+        for i, track in enumerate(tracks):
+            if track.current_bbox is None or track.current_center is None:
+                continue
+
+            predicted_bbox = track.predict() or track.current_bbox
+            predicted_center = (
+                (predicted_bbox[0] + predicted_bbox[2]) / 2.0,
+                (predicted_bbox[1] + predicted_bbox[3]) / 2.0,
+            )
+            box_width = max(1, predicted_bbox[2] - predicted_bbox[0])
+            box_height = max(1, predicted_bbox[3] - predicted_bbox[1])
+            distance_gate = max(35.0, 1.5 * np.sqrt(box_width**2 + box_height**2))
+
+            for j, detection in enumerate(detections):
+                class_bonus = 1.0 if detection.class_name == track.class_name else 0.65
+                center_distance = np.sqrt(
+                    (predicted_center[0] - detection.center[0]) ** 2
+                    + (predicted_center[1] - detection.center[1]) ** 2
+                )
+
+                if center_distance > distance_gate:
+                    continue
+
+                iou = self._compute_iou(predicted_bbox, detection.bbox)
+                distance_score = 1.0 - (center_distance / distance_gate)
+                confidence_score = detection.confidence
+
+                score_matrix[i, j] = class_bonus * (
+                    0.55 * iou + 0.35 * distance_score + 0.10 * confidence_score
+                )
+
+        return score_matrix
     
     def _compute_iou_matrix(self, tracks: List[Track], detections: List[Detection]) -> np.ndarray:
         """

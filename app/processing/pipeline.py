@@ -54,6 +54,7 @@ class VideoProcessor:
         self,
         video_path: str,
         output_video_path: Optional[str] = None,
+        output_dir: Optional[str] = None,
         visualize: bool = True,
         export_json: bool = False,
         export_csv: bool = False,
@@ -66,6 +67,7 @@ class VideoProcessor:
         Args:
             video_path: Path to input video
             output_video_path: Path for output video (optional)
+            output_dir: Directory for JSON/CSV exports (optional)
             visualize: Whether to draw annotations
             export_json: Whether to export results as JSON
             export_csv: Whether to export events as CSV
@@ -92,14 +94,33 @@ class VideoProcessor:
         fps = cap.get(cv2.CAP_PROP_FPS)
         width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
         height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+        frame_skip = max(1, int(self.config.get('processing.frame_skip', 1)))
+        resize_enabled = bool(self.config.get('processing.resize_enabled', False))
+        target_height = int(self.config.get('processing.target_height', height))
+        process_width, process_height = width, height
+        process_scale = 1.0
+
+        if resize_enabled and 0 < target_height < height:
+            scale = target_height / height
+            process_width = int(width * scale)
+            process_height = target_height
+            process_scale = scale
+
+        effective_fps = max(fps / frame_skip, 1.0) if fps > 0 else self.kinematics.fps
+        self.kinematics.fps = effective_fps
+        base_pixel_to_meter = self.config.get('kinematics.pixel_to_meter', self.kinematics.pixel_to_meter)
+        self.kinematics.pixel_to_meter = base_pixel_to_meter / process_scale
         
-        self.logger.info(f"Video properties: {width}x{height} @ {fps} FPS, {total_frames} frames")
+        self.logger.info(
+            f"Video properties: {width}x{height} @ {fps} FPS, {total_frames} frames | "
+            f"processing {process_width}x{process_height}, frame_skip={frame_skip}"
+        )
         
         # Setup output video writer if needed
         video_writer = None
         if output_video_path and visualize:
             fourcc = cv2.VideoWriter_fourcc(*'mp4v')
-            video_writer = cv2.VideoWriter(output_video_path, fourcc, fps, (width, height))
+            video_writer = cv2.VideoWriter(output_video_path, fourcc, effective_fps, (width, height))
             if not video_writer.isOpened():
                 self.logger.warning(f"Failed to open output video writer: {output_video_path}")
                 video_writer = None
@@ -107,6 +128,11 @@ class VideoProcessor:
         # Reset metrics
         self.metrics.reset()
         self.metrics.start_time = time.time()
+        self.tracker.reset()
+        self.kinematics.velocity_history.clear()
+        self.collision_detector.pair_states.clear()
+        self.collision_detector.active_events.clear()
+        self.collision_detector.location_cooldowns.clear()
         
         # Processing loop
         frame_idx = 0
@@ -120,13 +146,23 @@ class VideoProcessor:
                 
                 if not ret:
                     break
+
+                source_frame_idx = frame_idx
+                frame_idx += 1
+
+                if source_frame_idx % frame_skip != 0:
+                    continue
                 
                 # Process frame
                 frame_start_time = time.time()
+                processing_frame = frame
+
+                if (process_width, process_height) != (width, height):
+                    processing_frame = cv2.resize(frame, (process_width, process_height))
                 
                 # Detection
                 det_start = time.time()
-                detections = self.detector.detect(frame)
+                detections = self.detector.detect(processing_frame)
                 self.metrics.detection_times.append(time.time() - det_start)
                 
                 # Tracking
@@ -142,7 +178,7 @@ class VideoProcessor:
                 
                 # Collision detection
                 col_start = time.time()
-                collisions = self.collision_detector.detect(tracks, frame_idx, kinematics_states)
+                collisions = self.collision_detector.detect(tracks, source_frame_idx, kinematics_states)
                 # Filter duplicates is no longer needed with the state machine
                 self.metrics.collision_times.append(time.time() - col_start)
                 
@@ -155,8 +191,8 @@ class VideoProcessor:
                     
                     # Track accident
                     detected_accidents.append({
-                        'frame': frame_idx,
-                        'timestamp': format_timestamp(frame_idx, int(fps)),
+                        'frame': source_frame_idx,
+                        'timestamp': format_timestamp(source_frame_idx, int(fps)) if fps > 0 else "00:00:00",
                         'vehicle_ids': collision.track_ids,
                         'severity': assessment.level.value,
                         'score': assessment.score,
@@ -169,11 +205,14 @@ class VideoProcessor:
                 # Visualization
                 if visualize:
                     output_frame = self.visualizer.draw_frame(
-                        frame, tracks, collisions, severity_assessments,
-                        frame_idx, total_frames
+                        processing_frame, tracks, collisions, severity_assessments,
+                        source_frame_idx, total_frames
                     )
                 else:
-                    output_frame = frame
+                    output_frame = processing_frame
+
+                if output_frame.shape[1] != width or output_frame.shape[0] != height:
+                    output_frame = cv2.resize(output_frame, (width, height))
                 
                 # Write to output video
                 if video_writer:
@@ -186,23 +225,23 @@ class VideoProcessor:
                 
                 # Update UI periodically
                 # Frame callback more frequent for "video" feel
-                if frame_idx % 5 == 0 and frame_callback:
+                if source_frame_idx % (5 * frame_skip) == 0 and frame_callback:
                     try:
                         frame_callback(
                             frame=output_frame,
-                            frame_idx=frame_idx,
+                            frame_idx=source_frame_idx,
                             accidents_in_frame=len(collisions)
                         )
                     except Exception as e:
                         self.logger.warning(f"Frame callback error: {e}")
 
                 # Progress log and stats every 15 frames
-                if frame_idx % 15 == 0:
+                if source_frame_idx % (15 * frame_skip) == 0:
                     fps_current = self.metrics.frame_count / self.metrics.total_time if self.metrics.total_time > 0 else 0
-                    progress_percent = (frame_idx / total_frames) * 100 if total_frames > 0 else 0
+                    progress_percent = (source_frame_idx / total_frames) * 100 if total_frames > 0 else 0
                     
                     self.logger.info(
-                        f"Progress: {frame_idx}/{total_frames} | "
+                        f"Progress: {source_frame_idx}/{total_frames} | "
                         f"FPS: {fps_current:.1f} | "
                         f"Accidents: {self.metrics.accidents_detected}"
                     )
@@ -212,15 +251,14 @@ class VideoProcessor:
                         try:
                             progress_callback(
                                 progress=progress_percent,
-                                current_frame=frame_idx,
+                                current_frame=source_frame_idx,
                                 total_frames=total_frames,
                                 accidents=self.metrics.accidents_detected,
                                 fps=fps_current
                             )
                         except Exception as e:
                             self.logger.warning(f"Progress callback error: {e}")
-                
-                frame_idx += 1
+        
         
         finally:
             cap.release()
@@ -245,7 +283,7 @@ class VideoProcessor:
         
         # Export results
         if export_json or export_csv:
-            self._export_results(results, video_path, export_json, export_csv)
+            self._export_results(results, video_path, export_json, export_csv, output_dir=output_dir)
         
         return results
     
@@ -254,7 +292,8 @@ class VideoProcessor:
         results: Dict,
         video_path: str,
         export_json: bool = True,
-        export_csv: bool = True
+        export_csv: bool = True,
+        output_dir: Optional[str] = None
     ) -> None:
         """
         Export results to JSON and/or CSV.
@@ -266,23 +305,29 @@ class VideoProcessor:
             export_csv: Whether to export CSV
         """
         video_name = Path(video_path).stem
-        output_dir = Path(self.config.get('export.output_dir', 'outputs/'))
-        output_dir.mkdir(parents=True, exist_ok=True)
+        export_dir = Path(output_dir or self.config.get('export.output_dir', 'outputs/'))
+        export_dir.mkdir(parents=True, exist_ok=True)
         
         if export_json:
-            json_path = output_dir / f"{video_name}_results.json"
+            json_path = export_dir / f"{video_name}_results.json"
             with open(json_path, 'w') as f:
                 json.dump(results, f, indent=2)
             self.logger.info(f"Results exported to JSON: {json_path}")
         
         if export_csv:
-            csv_path = output_dir / f"{video_name}_events.csv"
+            csv_path = export_dir / f"{video_name}_events.csv"
+            fieldnames = ['frame', 'timestamp', 'vehicle_ids', 'severity', 'score', 'confidence', 'description']
+            
             if results['detected_accidents']:
                 with open(csv_path, 'w', newline='') as f:
-                    writer = csv.DictWriter(f, fieldnames=results['detected_accidents'][0].keys())
+                    writer = csv.DictWriter(f, fieldnames=fieldnames)
                     writer.writeheader()
                     writer.writerows(results['detected_accidents'])
-                self.logger.info(f"Events exported to CSV: {csv_path}")
+            else:
+                with open(csv_path, 'w', newline='') as f:
+                    writer = csv.DictWriter(f, fieldnames=fieldnames)
+                    writer.writeheader()
+            self.logger.info(f"Events exported to CSV: {csv_path}")
     
     def process_frame(self, frame) -> Dict:
         """
